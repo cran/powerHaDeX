@@ -1,0 +1,263 @@
+---
+title: "Simulation - example usage"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Example_simulation}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 5,
+  fig.align = 'center'
+)
+```
+
+
+
+
+```{r setup, warning=FALSE}
+library(powerHaDeX)
+```
+
+
+The package `powerHaDeX` is a tool for simulating and analyzing data coming from HDX-MS experiments along with the possibility of comparing the power of the tests verifying differences in deuteration levels. The functionality of the simulation involves generating a theoretical spectrum along with its replications, replicating the deuterium uptake curves obtained from spectra, and rejection rate estimation for comparison of the tests for differences in deuteration. Let us go through the process of simulation and all its features.
+
+
+## Data simulation
+
+### Theoretical spectra simulation
+
+
+The first step of the simulation is the generation of theoretical spectra of a deuterated peptide over time. To do so, the function `simulate_theoretical_spectra` is used. There is the possibility of simulation a mass spectrum for more than one point of time and more than one charge by specifying the parameters `charge` and `times`. Providing vector of charges and/or vector of exposure times we obtain a `data table` of spectra consistent with assumed parameters.
+
+
+For example, a single spectrum can be simulated as below
+
+
+```{r}
+set.seed(17)
+
+theo_spectrum <- simulate_theoretical_spectra(sequence = "CHERICHERILADY",
+                                              charge = 4,
+                                              protection_factor = 100,
+                                              times = 0.167,
+                                              pH = 7.5,
+                                              temperature = 15,
+                                              n_molecules = 500,
+                                              time_step_const = 1,
+                                              use_markov = TRUE)
+theo_spectrum
+```
+
+As we can see in the output - we obtain a spectrum for the given time of measurement 0.167 sec and control measurement measured directly after adding the buffer (conventionally at time equal to 0). Each row of the data is correspondent to a single peak in the spectrum. Such a result for a particular time can be visualized using `powerHaDeX` as shown below. 
+
+```{r}
+plot_spectra(theo_spectrum)
+```
+
+We can also draw the measurement at the time 0 specifying `control_time = TRUE` as below.
+
+
+```{r}
+plot_spectra(theo_spectrum, control_time = TRUE)
+```
+
+
+
+As said before, more than one spectrum can be simulated for different exposure times and charges. Such a case is shown in the following code. We specify two values of charge (3 and 5) and time of measurements (0.167 and 5).
+
+```{r}
+set.seed(17)
+
+theo_spectra <- simulate_theoretical_spectra(sequence = "CHERICHERILADY",
+                                             charge = c(3, 5),
+                                             protection_factor = 100,
+                                             times = c(0.167, 5),
+                                             pH = 7.5,
+                                             temperature = 15,
+                                             n_molecules = 500,
+                                             time_step_const = 1,
+                                             use_markov = TRUE)
+
+head(theo_spectra)
+```
+
+Such a result can be also displayed on the plot as shown below.
+
+
+```{r}
+plot_spectra(theo_spectra)
+```
+
+
+
+### Replicated spectra
+
+#### one/all states
+
+To generate replications of the experiment of hydrogen-deuterium exchange the function `add_noise_to_spectra` can be used. We need to evaluate `get_undeuterated_mass` and `get_spectra_list` first as in the code below. By setting `compare_pairs = FALSE` we do not pair the spectra by protection factors (in the case of our example we did not provide more than one value of protection factor yet).
+
+
+```{r}
+undeuterated_mass = get_undeuterated_mass(theo_spectra)
+spectra = get_spectra_list(theo_spectra)
+replicated_spectra = add_noise_to_spectra(spectra,
+                                          undeuterated_mass = undeuterated_mass,
+                                          n_experiments = 2)
+replicated_spectra
+```
+
+
+The output of the function `add_noise_to_spectra` is adapted to the power calculations. Therefore, it is a list of two elements: the first one is correspondent to the pair of protection factors (in the case when `compare_pairs = FALSE` we consider all protection factors jointly) and the second is correspondent to the repetitions of the whole experiment (used for the needs of power calculations). By setting the number of experiments `n_experiments = 2` we simulate two experiments, that is (by default) 4 replicates of measurements for given time points, duplicated. The mentioned replicates are defined in the column `Rep`. 
+
+#### paired states
+
+There is an option of generation noisy spectra such that they are prepared for the pairwise testing procedure (for paired states). To take a look at such an example, let us use `theo_spectra` generated previously for `protection factor = 100` and simulate theoretical spectra at state `protection factor = 200` using the function `simulate_theoretical_spectra`:
+
+
+```{r}
+
+theo_spectra_pf_100 <- theo_spectra
+theo_spectra_pf_200 <- simulate_theoretical_spectra(sequence = "CHERICHERILADY",
+                                                    charge = c(3, 5),
+                                                    protection_factor = 200,
+                                                    times = c(0.167, 5),
+                                                    pH = 7.5,
+                                                    temperature = 15,
+                                                    n_molecules = 500,
+                                                    time_step_const = 1,
+                                                    use_markov = TRUE)
+
+theo_spectra_two_states <- rbind(theo_spectra_pf_100, theo_spectra_pf_200)
+
+```
+
+A data table of spectra at different states (`theo_spectra_two_states` here) can be used as the argument in the functions responsible for adding noise. As explained before, we use the functions `get_undeuterated_mass` and `get_spectra_list` first. We specify the need for the data grouped pairwise in the function `get_spectra_list` by setting `compare_pairs = TRUE` and `reference = "all"` as below
+
+
+
+```{r}
+
+undeuterated_mass = get_undeuterated_mass(theo_spectra_two_states)
+spectra = get_spectra_list(theo_spectra_two_states,
+                           compare_pairs = TRUE,
+                           reference = "all")
+replicated_spectra_paired = add_noise_to_spectra(spectra,
+                                                 undeuterated_mass = undeuterated_mass,
+                                                 n_experiments = 2)
+replicated_spectra_paired
+```
+
+
+As we can see, we obtained the output adapted to the pairwise comparison - each element of a list is a list of data tables (according to the argument `n_experiments`) for paired states. In our example, we get three pairs: 100 vs. 200 for power estimation and 100 vs. 100, 200 vs, 200 for type I error estimation.
+
+#### deuteration curves from spectra
+
+Having noisy mass spectra simulated by the function `add_noise_to_spectra` as shown in the previous sections we can use the function `get_deuteration_curves_from_spectra` to calculate deuterium uptake as follows:
+
+```{r}
+deuteration_curves <- get_deuteration_curves_from_spectra(replicated_spectra)
+deuteration_curves
+```
+
+
+As we can see, we obtain the output analogous to the output of `add_noise_to_spectra` but containing deuterium uptake curves instead of mass spectra. 
+
+
+## Noisy deuteration curves
+
+We can also simulate noisy deuteration curves using the direct output of `simulate_theoretical_spectra`. As mentioned before, we specify the number of technical replicates and executions of the experiment using the arguments `n_replicates` and `n_experiments`. An example for the case when one/"all" states are considered is shown in the following code:
+
+```{r}
+get_noisy_deuteration_curves(theo_spectra,
+                             n_replicates = 4,
+                             n_experiments = 2,
+                             compare_pairs = FALSE)
+```
+
+
+The case when the pairwise comparisons are considered requires providing the data simulated for different protection factors. Let us take a look at the results for `theo_spectra_two_states` simulated in the previous section:
+
+```{r}
+deuteration_curves_paired_states <- get_noisy_deuteration_curves(theo_spectra_two_states,
+                                                                 n_replicates = 4,
+                                                                 n_experiments = 2,
+                                                                 compare_pairs = TRUE,
+                                                                 reference = "all")
+deuteration_curves_paired_states
+```
+
+
+## Power estimation
+
+The package `powerHaDeX` provides a possibility of the estimation of rejection rate in pairwise testing of differences in deuteration levels. 
+
+The tests available in the package are:
+
+- `test_semiparametric` - Semiparametric test,
+
+- `test_houde` - Damian Houde's confidence intervals test (Houde, Berkowitz, and Engen 2011),
+
+- `test_hdx_analyzer` - HDX-Analyzer model (Liu et al. 2011),
+
+- `test_memhdx_model` - MEMHDX model (Hourdel et al. 2016).
+
+
+We can use the function `calculate_hdx_power` to execute the testing procedure on the data simulated by `get_noisy_deuteration_curves`. Example usage of the function is shown below
+
+```{r}
+calculate_hdx_power(deuteration_curves_paired_states,
+                    tests = list(test_houde),
+                    summarized = FALSE)
+```
+
+
+The summarized result is following
+
+```{r}
+calculate_hdx_power(deuteration_curves_paired_states,
+                    tests = list(test_houde),
+                    summarized = TRUE)
+```
+
+
+
+
+
+There is a possibility of simulate the rejection rate of another test using an external implementation. Such a test function for pairwise testing should be of specific shape as below:
+
+
+```{r, eval = FALSE}
+example_test <- function(data, significance_level) {
+  States = unique(data$State)
+  
+  # testing procedure here
+  
+  return(data.table::data.table(Test = "Example test",
+                                State_1 = States[1],
+                                State_2 = States[2],
+                                Test_statistic = NA,
+                                P_value = NA,
+                                Significant_difference = #TRUE or FALSE,
+                                  Time = NA,
+                                Transformation = NA,
+                                AIC = NA,
+                                logLik = NA))
+}
+
+```
+
+
+where the parameter `data` is one experiment, that is one data table obtained from the function `get_noisy_deuteration_curves`. In order to add such a test to the simulation, we should set `tests = list(houde, example_test)`.
+
+
+
+
+
+
+
+
